@@ -36,3 +36,6 @@ data/
 
 # Local tooling
 .claude/settings.local.json
+
+# Local test data and screenshots (never committed)
+local/
