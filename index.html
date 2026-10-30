@@ -1,0 +1,1112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DuckDB Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  /* Pond palette: warm paper, deep pond-teal ink, duck-bill yellow. Chart series validated for CVD separation in both modes. */
+  :root {
+    color-scheme: light;
+    --surface-0: #f6f1e6;
+    --surface-1: #fffdf7;
+    --border: #e3dccb;
+    --text-primary: #14211f;
+    --text-secondary: #4a5753;
+    --text-muted: #7d8783;
+    --accent: #00796f;
+    --accent-soft: #dcefe9;
+    --duck: #f2b705;
+    --duck-soft: #fdf0c4;
+    --duck-ink: #2a1f00;
+    --bill: #e8772a;
+    --ink: #0f2a27;
+    --ink-text: #f6f1e6;
+    --grid: #ece5d6;
+    --dot: rgba(15,42,39,.07);
+    --shadow-hard: rgba(15,42,39,.09);
+    --other: #b9b2a3;
+    --s1: #00938c; --s2: #d9691a; --s3: #5b4fd0; --s4: #b38600;
+    --s5: #d6456b; --s6: #2f86c9; --s7: #6b8f00; --s8: #a24ba8;
+    --good: #23894a; --warn: #e6a700; --crit: #c8373d;
+    --good-soft: rgba(35,137,74,.13); --warn-soft: rgba(230,167,0,.20); --crit-soft: rgba(200,55,61,.12);
+    --hover: #f3ecdc;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-0: #0d1816;
+      --surface-1: #14211f;
+      --border: #24362f;
+      --text-primary: #eef3ee;
+      --text-secondary: #b3c2bc;
+      --text-muted: #7f908a;
+      --accent: #3cc7b9;
+      --accent-soft: #163a35;
+      --duck: #f5c22a;
+      --duck-soft: #3a3214;
+      --duck-ink: #1d1600;
+      --bill: #f08a3c;
+      --ink: #081311;
+      --ink-text: #eef3ee;
+      --grid: #1f2e2b;
+      --dot: rgba(60,199,185,.07);
+      --shadow-hard: rgba(0,0,0,.35);
+      --other: #4d5c57;
+      --s1: #16a197; --s2: #d9701f; --s3: #7f74e6; --s4: #b8880a;
+      --s5: #e45a80; --s6: #3d95dd; --s7: #7ea312; --s8: #b867c6;
+      --good: #3fb86a; --warn: #f2b705; --crit: #e5545a;
+      --good-soft: rgba(63,184,106,.20); --warn-soft: rgba(242,183,5,.20); --crit-soft: rgba(229,84,90,.22);
+      --hover: #1a2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  ::selection { background: var(--duck); color: var(--duck-ink); }
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  :focus-visible { outline: 2px solid var(--duck); outline-offset: 2px; }
+  body {
+    margin: 0; height: 100vh; display: grid;
+    grid-template-columns: 240px 280px 1fr; grid-template-rows: auto 1fr;
+    font: 14px/1.4 system-ui, -apple-system, sans-serif;
+    background: var(--surface-0); color: var(--text-primary);
+  }
+  header {
+    grid-column: 1 / -1; padding: 10px 18px; display: flex; gap: 14px; align-items: center;
+    background:
+      repeating-radial-gradient(circle at 92% 150%, transparent 0 14px, rgba(242,183,5,.16) 14px 15px, transparent 15px 26px),
+      repeating-radial-gradient(circle at 70% -60%, transparent 0 22px, rgba(60,199,185,.10) 22px 23px, transparent 23px 34px),
+      var(--ink);
+    color: var(--ink-text); border-bottom: 3px solid var(--duck);
+  }
+  header .mark { width: 34px; height: 34px; flex: none; color: rgba(255,255,255,.55); }
+  header .mark .head { animation: bob 3.2s ease-in-out infinite; transform-origin: 50% 80%; }
+  @keyframes bob { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(1.5px) rotate(-3deg); } }
+  header h1 { font: italic 600 19px/1 var(--serif); margin: 0; letter-spacing: .01em; }
+  header h1 b { font-style: normal; color: var(--duck); }
+  header .db {
+    margin-left: auto; color: rgba(246,241,230,.75); font: 12px var(--mono); padding: 3px 10px;
+    border: 1px solid rgba(246,241,230,.18); border-radius: 999px; background: rgba(255,255,255,.04);
+  }
+  header .db::before { content: "◉ "; color: var(--duck); }
+  .pane { overflow: auto; border-right: 1px solid var(--border); background: var(--surface-1); }
+  .pane:first-of-type { background: linear-gradient(180deg, var(--surface-1), var(--surface-0) 140%); }
+  .pane h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted);
+    margin: 0; padding: 14px 14px 8px; position: sticky; top: 0; z-index: 1; background: inherit;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .pane h2::before { content: ""; width: 14px; height: 4px; border-radius: 2px; background: var(--duck); box-shadow: 4px 4px 0 var(--accent); margin-bottom: 4px; }
+  .pane:first-of-type h2 { background: var(--surface-1); }
+  .list { list-style: none; margin: 0; padding: 0 8px 12px; }
+  .list li {
+    padding: 6px 8px 6px 10px; border-radius: 8px; cursor: pointer; display: flex; position: relative;
+    justify-content: space-between; gap: 8px; align-items: center; transition: background .12s;
+  }
+  .list li:hover { background: var(--hover); }
+  .list li.active { background: var(--accent-soft); }
+  .list li.active::before { content: ""; position: absolute; left: 2px; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--duck); }
+  .list li.active .name { font-weight: 600; }
+  .list .meta { color: var(--text-muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list li .ord {
+    min-width: 20px; height: 20px; border-radius: 10px 10px 10px 3px; font-size: 11px; font-weight: 700; display: inline-grid;
+    place-items: center; background: var(--duck); color: var(--duck-ink); box-shadow: 1px 1px 0 var(--bill);
+  }
+  .search { margin: 0 12px 8px; width: calc(100% - 24px); padding: 6px 10px; border: 1px solid var(--border);
+    border-radius: 999px; background: var(--surface-0); color: var(--text-primary); font: inherit; }
+  .search:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+  main {
+    overflow: auto; padding: 18px 22px 40px;
+    background-image: radial-gradient(var(--dot) 1px, transparent 1.3px); background-size: 18px 18px;
+  }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .chip {
+    display: inline-flex; gap: 6px; align-items: center; padding: 3px 4px 3px 10px; border-radius: 14px;
+    background: var(--duck-soft); border: 1px solid color-mix(in srgb, var(--duck) 45%, transparent); font-size: 13px;
+  }
+  .chip button { border: 0; background: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; padding: 0 4px; border-radius: 50%; }
+  .chip button:hover { background: var(--duck); color: var(--duck-ink); }
+  .chip select.grain { font-size: 12px; padding: 1px 4px; border-radius: 10px; box-shadow: none; border-color: color-mix(in srgb, var(--duck) 45%, transparent); }
+  .toolbar label { color: var(--text-secondary); font-size: 13px; margin-left: auto; }
+  select, .btn {
+    font: inherit; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); cursor: pointer; box-shadow: 0 2px 0 var(--shadow-hard);
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); box-shadow: none; }
+  .btn[type="submit"] { background: var(--accent); border-color: var(--accent); color: var(--surface-1); font-weight: 600; }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px;
+    box-shadow: 4px 4px 0 var(--shadow-hard);
+  }
+  .card h3 { margin: 0 0 2px; font: 600 16px/1.3 var(--serif); }
+  .card .sub { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; }
+  .chart-wrap { position: relative; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 10px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--border); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.null { color: var(--text-muted); font-style: italic; }
+  .bar-cell { width: 30%; }
+  .bar-cell div { height: 8px; border-radius: 0 4px 4px 0; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--duck))); }
+  .empty { color: var(--text-muted); padding: 220px 0 40px; text-align: center; position: relative; font: italic 16px var(--serif); }
+  .empty::before {
+    content: ""; position: absolute; left: 50%; top: 40px; width: 160px; height: 160px; transform: translateX(-50%); border-radius: 50%;
+    background: repeating-radial-gradient(circle, var(--accent-soft) 0 2px, transparent 2px 16px);
+    -webkit-mask: radial-gradient(circle, #000 30%, transparent 70%); mask: radial-gradient(circle, #000 30%, transparent 70%);
+  }
+  .empty::after {
+    content: ""; position: absolute; left: 50%; top: 112px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%;
+    background: var(--duck); box-shadow: 0 0 0 6px var(--duck-soft);
+  }
+  .error { color: var(--crit); background: var(--crit-soft); padding: 10px 12px; border-radius: 8px; border-left: 3px solid var(--crit); }
+  .loading { color: var(--text-muted); display: flex; align-items: center; gap: 10px; }
+  .loading::before {
+    content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--duck); flex: none;
+    animation: ripple 1.4s ease-out infinite;
+  }
+  @keyframes ripple {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent), 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); }
+    100% { box-shadow: 0 0 0 10px transparent, 0 0 0 18px transparent; }
+  }
+  .where { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .where label {
+    font: 700 11px var(--mono); letter-spacing: .08em; color: var(--duck-ink); background: var(--duck);
+    padding: 4px 8px; border-radius: 4px; transform: rotate(-2deg); box-shadow: 2px 2px 0 var(--bill);
+  }
+  .where input { flex: 1 1 320px; min-width: 0; font: 13px var(--mono); padding: 6px 10px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); }
+  .where input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .where.on input { border-color: var(--accent); border-left: 4px solid var(--accent); }
+  .where { position: relative; }
+  .ac { position: absolute; z-index: 20; margin: 0; padding: 4px 0; list-style: none; max-height: 280px; overflow: auto;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; box-shadow: 4px 6px 0 var(--shadow-hard), 0 10px 28px rgba(0,0,0,.14);
+    font: 13px var(--mono); }
+  .ac li { display: flex; justify-content: space-between; gap: 16px; padding: 4px 10px; cursor: pointer; }
+  .ac li[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--duck); }
+  .ac .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ac .n b { color: var(--accent); font-weight: 700; text-decoration: underline 2px var(--duck); text-underline-offset: 3px; }
+  .ac .h { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+  .where-msg { font-size: 12px; color: var(--text-muted); }
+  .where-msg.error { color: var(--crit); background: none; padding: 0; border: 0; }
+  .list li .wf { color: var(--bill); font-weight: 600; }
+  .list li.dim .name, .list li.dim .meta { color: var(--text-muted); opacity: .75; }
+  .tabs {
+    display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 18px; border-radius: 999px;
+    background: var(--surface-1); border: 1px solid var(--border); box-shadow: 0 2px 0 var(--shadow-hard);
+  }
+  .tabs button {
+    font: inherit; padding: 6px 16px; border: 0; border-radius: 999px;
+    background: none; color: var(--text-secondary); cursor: pointer; transition: background .15s, color .15s;
+  }
+  .tabs button:hover { color: var(--text-primary); background: var(--hover); }
+  .tabs button[aria-selected="true"] { color: var(--ink-text); background: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--duck); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .kpi {
+    --tint: var(--accent);
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px 10px;
+    position: relative; overflow: hidden; box-shadow: 4px 4px 0 var(--shadow-hard); border-top: 4px solid var(--tint);
+  }
+  .kpi:nth-child(2) { --tint: var(--duck); }
+  .kpi:nth-child(3) { --tint: var(--s3); }
+  .kpi:nth-child(4) { --tint: var(--bill); }
+  .kpi::after {
+    content: ""; position: absolute; right: -36px; bottom: -36px; width: 96px; height: 96px; border-radius: 50%; pointer-events: none;
+    background: repeating-radial-gradient(circle, transparent 0 7px, color-mix(in srgb, var(--tint) 22%, transparent) 7px 8px);
+  }
+  .kpi .k { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+  .kpi .v { font: 600 30px/1.2 var(--serif); font-variant-numeric: tabular-nums lining-nums; }
+  .kpi .s { color: var(--text-muted); font-size: 12px; min-height: 17px; }
+  .dot {
+    display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; flex: none;
+    font-size: 10px; font-weight: 700; line-height: 1; color: #fff; vertical-align: middle;
+  }
+  .dot.ok { background: var(--good); } .dot.warn { background: var(--warn); color: #1a1a19; } .dot.error { background: var(--crit); }
+  .pill {
+    display: inline-flex; gap: 6px; align-items: center; padding: 2px 10px 2px 4px; border-radius: 12px;
+    font-size: 12px; font-weight: 600; color: var(--text-primary); white-space: nowrap;
+  }
+  .pill.ok { background: var(--good-soft); } .pill.warn { background: var(--warn-soft); } .pill.error { background: var(--crit-soft); }
+  details.chk > summary, .chk-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; cursor: pointer; list-style: none; }
+  .chk-head { cursor: default; }
+  details.chk > summary::-webkit-details-marker { display: none; }
+  details.chk > summary::before { content: "\25B8"; color: var(--accent); width: 12px; transition: transform .15s; }
+  details.chk[open] > summary::before { content: "\25BE"; }
+  .card.chk { border-left: 4px solid var(--good); }
+  .card.chk:has(.pill.warn) { border-left-color: var(--warn); }
+  .card.chk:has(.pill.error) { border-left-color: var(--crit); }
+  .chk h3 { margin: 0; }
+  .chk .sum { flex-basis: 100%; color: var(--text-secondary); padding-left: 22px; }
+  .chk .desc { color: var(--text-muted); font-size: 12px; margin: 6px 0 10px 22px; }
+  .chk-body { margin-top: 4px; }
+  .chk table tr.hasex td { border-bottom: 0; }
+  td.ex { padding-top: 0; white-space: normal; }
+  .ex-chip {
+    display: inline-block; margin: 0 4px 4px 0; padding: 0 6px; border-radius: 4px; background: var(--surface-0); border: 1px dashed var(--border);
+    color: var(--text-muted); font: 11px/18px var(--mono); max-width: 260px; overflow: hidden; text-overflow: ellipsis; vertical-align: top;
+  }
+  .linkbtn { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-align: left; }
+  .linkbtn:hover { text-decoration: underline 2px var(--duck); text-underline-offset: 3px; }
+  .rowc { display: inline-flex; gap: 8px; align-items: center; }
+  .badge {
+    display: inline-block; padding: 0 6px; margin-right: 4px; border-radius: 4px; font-size: 11px; line-height: 17px;
+    background: var(--surface-0); color: var(--text-secondary); border: 1px solid var(--border);
+  }
+  .badge.warn { background: var(--warn-soft); border-color: transparent; color: var(--text-primary); }
+  .fchips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fchip {
+    font: inherit; font-size: 12px; padding: 3px 11px; border-radius: 14px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-secondary); cursor: pointer;
+  }
+  .fchip:hover { border-color: var(--accent); }
+  .fchip[aria-pressed="true"] { background: var(--ink); color: var(--ink-text); border-color: var(--ink); box-shadow: 2px 2px 0 var(--duck); }
+  .prof-q { font: inherit; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-0); color: var(--text-primary); min-width: 160px; }
+  .prof-q:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .toolbar .count { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+  th .thbtn { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; text-transform: inherit; letter-spacing: inherit; }
+  th .thbtn:hover { color: var(--text-primary); }
+  th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--accent); }
+  td.trunc { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  td.cname { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+  tr.prow { cursor: pointer; }
+  tr.prow:hover td { background: var(--hover); }
+  tr.prow[aria-expanded="true"] td { background: var(--accent-soft); }
+  tr.prow.dim td { color: var(--text-muted); }
+  .fcell { display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end; }
+  .fbar { width: 56px; height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; display: inline-block; }
+  .fbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--duck))); }
+  .fbar.low { background: repeating-linear-gradient(135deg, var(--grid) 0 3px, transparent 3px 6px); }
+  .fbar.low i { background: var(--text-muted); }
+  tr.detail td { background: var(--surface-0); white-space: normal; box-shadow: inset 4px 0 0 var(--duck); }
+  .dbox { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; justify-content: space-between; }
+  .dbox table { width: auto; min-width: 360px; }
+  .dbox .mini { width: 90px; height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+  .dbox .mini i { display: block; height: 100%; background: var(--duck); }
+  .dbox td { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  @media (prefers-reduced-motion: reduce) {
+    header .mark .head, .loading::before { animation: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <svg class="mark" viewBox="0 0 34 34" aria-hidden="true">
+    <path d="M2 27q5-3.5 10 0t10 0 10 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M7 31.5q4-2.5 8 0t8 0" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".6"/>
+    <g class="head">
+      <path d="M6 23q0-7 8-7h3q8 0 9 7z" fill="var(--duck)"/>
+      <circle cx="15" cy="11" r="6.5" fill="var(--duck)"/>
+      <path d="M20.5 9.5h6.5a2.2 2.2 0 0 1 0 4.4h-6z" fill="var(--bill)"/>
+      <circle cx="16.4" cy="9.4" r="1.4" fill="var(--ink)"/>
+    </g>
+  </svg>
+  <h1><b>duck</b>db explorer</h1><span class="db" id="db"></span></header>
+
+<section class="pane">
+  <h2>Tables</h2>
+  <ul class="list" id="tables"></ul>
+</section>
+
+<section class="pane">
+  <h2>Columns <span id="col-hint" style="text-transform:none;letter-spacing:0"></span></h2>
+  <input class="search" id="col-search" placeholder="Filter columns…" hidden>
+  <ul class="list" id="columns"></ul>
+</section>
+
+<main id="main"><div class="empty">Pick a table, then click a column to group by it (Ctrl+click to add more).</div></main>
+
+<script>
+const state = { table: null, columns: [], selected: [], grains: {}, limit: 10, chart: null, req: 0, tableReq: 0,
+  view: "health", shellView: null, cache: {}, prof: null, db: "", where: "",
+  whereUi: { draft: "", status: "", msg: "" } };
+const newProf = () => ({ filter: "all", q: "", sort: { key: null, dir: 1 }, open: new Set(), detail: {} });
+const OTHER = "(other)";
+const fmt = new Intl.NumberFormat();
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+async function api(path, params = {}) {
+  const res = await fetch(`${path}?${new URLSearchParams(params)}`);
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+const whereKey = (t) => `dbx.where:${state.db}:${t.schema}.${t.name}`;
+function loadWhere(t) {
+  try { return localStorage.getItem(whereKey(t)) || ""; } catch { return ""; }
+}
+function saveWhere(t, w) {
+  try { w ? localStorage.setItem(whereKey(t), w) : localStorage.removeItem(whereKey(t)); } catch {}
+}
+// Query params identifying the current table, plus its WHERE clause if one is applied.
+const tparams = (extra = {}) => ({
+  schema: state.table.schema, table: state.table.name, ...(state.where ? { where: state.where } : {}), ...extra
+});
+
+async function loadTables() {
+  state.db = (await api("/api/info")).db;
+  $("db").textContent = state.db;
+  const tables = await api("/api/tables");
+  $("tables").innerHTML = tables
+    .map((t, i) => `<li data-i="${i}" title="${esc(t.schema)}.${esc(t.name)}">
+      <span class="name">${t.schema === "main" ? "" : esc(t.schema) + "."}${esc(t.name)}</span>
+      <span class="meta">${loadWhere(t) ? `<span class="wf" title="Has a saved WHERE filter">● </span>` : ""}${t.rows != null ? fmt.format(t.rows) + " rows · " : t.type === "VIEW" ? "view · " : ""}${t.columns} cols</span></li>`)
+    .join("");
+  $("tables").onclick = (e) => {
+    const li = e.target.closest("li");
+    if (li) selectTable(tables[li.dataset.i], li);
+  };
+  const h = new URLSearchParams(location.hash.slice(1));
+  const i = tables.findIndex((t) => `${t.schema}.${t.name}` === h.get("t"));
+  if (i >= 0) {
+    state.limit = +h.get("n") || state.limit;
+    const sel = JSON.parse(h.get("c") || "[]");
+    const v = h.get("v");
+    await selectTable(tables[i], $("tables").children[i], sel, v === "health" || v === "groupby" ? v : sel.length ? "groupby" : "health", h.get("w") ?? undefined,
+      JSON.parse(h.get("g") || "{}"));
+  }
+}
+
+function syncHash() {
+  const h = new URLSearchParams({ t: `${state.table.schema}.${state.table.name}`, n: state.limit, v: state.view });
+  if (state.selected.length) h.set("c", JSON.stringify(state.selected));
+  if (Object.keys(state.grains).length) h.set("g", JSON.stringify(state.grains));
+  if (state.where) h.set("w", state.where);
+  history.replaceState(null, "", `#${h}`);
+}
+
+async function selectTable(t, li, selected = [], view = selected.length ? "groupby" : "health", where = loadWhere(t), grains = {}) {
+  document.querySelectorAll("#tables li").forEach((el) => el.classList.toggle("active", el === li));
+  const my = ++state.tableReq;
+  state.table = t;
+  state.selected = selected;
+  state.grains = grains;
+  state.view = view;
+  state.cache = {};
+  state.prof = newProf();
+  state.shellView = null;
+  state.columns = [];
+  state.where = where;
+  state.whereUi = { draft: where, status: "", msg: "" };
+  const cols = await api("/api/columns", { schema: t.schema, table: t.name });
+  if (my !== state.tableReq) return;
+  state.columns = cols;
+  $("col-search").hidden = false;
+  $("col-search").value = "";
+  $("col-hint").textContent = `(${state.columns.length})`;
+  renderColumns();
+  renderMain();
+  ensure("profile");
+  if (state.view === "health") ensure("sfchecks");
+  if (where) applyWhere(where);
+}
+
+function renderWhere() {
+  const ui = state.whereUi;
+  return `<form class="where ${state.where ? "on" : ""}" id="where-form">
+    <label for="where-in">WHERE</label>
+    <input id="where-in" value="${esc(ui.draft)}" spellcheck="false" autocomplete="off" title="Ctrl+Space for suggestions"
+      role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ac"
+      placeholder="e.g. &quot;CreatedDate&quot; >= '2024-01-01' and &quot;BillingCountry&quot; = 'US'">
+    <button class="btn" type="submit">Apply</button>
+    ${state.where || ui.draft ? `<button class="btn" type="button" id="where-clear">Clear</button>` : ""}
+    <span class="where-msg ${ui.status}" id="where-msg">${esc(ui.msg)}</span></form>`;
+}
+
+function setWhereMsg(status, msg) {
+  Object.assign(state.whereUi, { status, msg });
+  const el = $("where-msg");
+  if (el) { el.className = `where-msg ${status}`; el.textContent = msg; }
+}
+
+// Validate a WHERE clause on the server; if it changed, re-scope every view to the matching rows.
+async function applyWhere(w) {
+  const t = state.table;
+  w = w.trim();
+  state.whereUi.draft = w;
+  setWhereMsg("", w ? "Checking…" : "");
+  let r;
+  try {
+    r = await api("/api/where", { schema: t.schema, table: t.name, ...(w ? { where: w } : {}) });
+  } catch (err) {
+    if (state.table !== t) return;
+    if (w === state.where) {  // a saved or linked filter that no longer parses
+      saveWhere(t, "");
+      document.querySelector("#tables li.active .wf")?.remove();
+      rescope("");
+    }
+    setWhereMsg("error", err.message);
+    return;
+  }
+  if (state.table !== t) return;
+  const pct = r.total ? ` (${fmtPct((r.matched / r.total) * 100)}%)` : "";
+  setWhereMsg("", r.where ? `${fmt.format(r.matched)} of ${fmt.format(r.total)} rows${pct}` : "");
+  saveWhere(t, r.where);
+  document.querySelector("#tables li.active .wf")?.remove();
+  if (r.where) document.querySelector("#tables li.active .meta")?.insertAdjacentHTML("afterbegin", `<span class="wf" title="Has a saved WHERE filter">● </span>`);
+  if (r.where !== state.where) rescope(r.where);
+}
+
+function rescope(where) {
+  state.where = where;
+  state.cache = {};
+  state.prof = newProf();
+  state.shellView = null;
+  renderColumns();
+  renderMain();
+  ensure("profile");
+  if (state.view === "health") ensure("sfchecks");
+}
+
+function renderColumns() {
+  const q = $("col-search").value.toLowerCase();
+  $("columns").innerHTML = state.columns
+    .filter((c) => !q || c.name.toLowerCase().includes(q))
+    .map((c) => {
+      const pos = state.selected.indexOf(c.name);
+      const p = profCol(c.name);
+      const type = c.type.replace(" WITH TIME ZONE", "TZ");
+      const info = p ? `${type} · ${fmtPct(p.filled_pct)}%` : type;
+      const dim = p && p.filled_pct < 1;
+      return `<li data-name="${esc(c.name)}" class="${pos >= 0 ? "active" : ""} ${dim ? "dim" : ""}">
+        <span class="name" title="${esc(c.name)}">${esc(c.name)}</span>
+        ${pos >= 0 ? `<span class="ord">${pos + 1}</span>` : `<span class="meta">${esc(info)}</span>`}</li>`;
+    })
+    .join("");
+}
+
+$("col-search").oninput = renderColumns;
+// Click groups by just that column; Ctrl/Cmd+click adds it to (or removes it from) the current grouping.
+// On macOS Ctrl+click fires contextmenu instead of click, so handle it there too.
+let ctrlClickAt = 0;
+$("columns").onclick = (e) => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  if (e.ctrlKey || e.metaKey) {
+    if (Date.now() - ctrlClickAt > 300) toggleColumn(li.dataset.name);
+  } else selectOnly(li.dataset.name);
+};
+$("columns").oncontextmenu = (e) => {
+  const li = e.target.closest("li");
+  if (!li || !e.ctrlKey) return;
+  e.preventDefault();
+  ctrlClickAt = Date.now();
+  toggleColumn(li.dataset.name);
+};
+
+function setSelected(selected) {
+  const grains = {};
+  for (const name of selected) {
+    const g = state.grains[name] ?? (state.selected.includes(name) ? null : defaultGrain(name));
+    if (g) grains[name] = g;
+  }
+  state.selected = selected;
+  state.grains = grains;
+  state.view = "groupby";
+  renderColumns();
+  renderMain();
+}
+
+function toggleColumn(name) {
+  const i = state.selected.indexOf(name);
+  setSelected(i >= 0 ? state.selected.filter((c) => c !== name) : [...state.selected, name]);
+}
+
+function selectOnly(name) {
+  setSelected(state.selected.length === 1 && state.selected[0] === name ? [] : [name]);
+}
+
+// Date/time buckets offered for date and timestamp columns; `ts` ones need a time component.
+const GRAINS = [
+  ["Timeline", [["year", "Year"], ["quarter", "Quarter"], ["month", "Month"], ["week", "Week"], ["day", "Day"], ["hour", "Hour", true]]],
+  ["Cycle", [["month_of_year", "Month of year"], ["week_of_year", "Week of year"], ["day_of_week", "Day of week"], ["hour_of_day", "Hour of day", true]]]
+];
+const colType = (name) => state.columns.find((c) => c.name === name)?.type.toUpperCase() ?? "";
+const isDateCol = (name) => /^(DATE|TIMESTAMP)/.test(colType(name));
+const defaultGrain = (name) => (isDateCol(name) ? "month" : null);
+
+function grainSelect(name) {
+  if (!isDateCol(name)) return "";
+  const ts = colType(name).startsWith("TIMESTAMP"), cur = state.grains[name] ?? "";
+  const groups = GRAINS.map(([label, gs]) => `<optgroup label="${label}">${gs
+    .filter(([, , needsTs]) => ts || !needsTs)
+    .map(([v, l]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${l}</option>`).join("")}</optgroup>`).join("");
+  return `<select class="grain" data-grain="${esc(name)}" aria-label="Group ${esc(name)} by">
+    <option value="" ${cur ? "" : "selected"}>Exact value</option>${groups}</select>`;
+}
+
+function renderToolbar() {
+  const chips = state.selected
+    .map((c, i) => `<span class="chip">${i + 1}. ${esc(c)}${grainSelect(c)}<button data-rm="${esc(c)}" title="Remove">×</button></span>`)
+    .join("");
+  const opts = [5, 10, 20, 50, 100].map((n) => `<option ${n === state.limit ? "selected" : ""}>${n}</option>`).join("");
+  return `<div class="toolbar">${chips}
+    ${state.selected.length ? `<button class="btn" id="clear">Clear</button>` : ""}
+    <label>Top <select id="limit">${opts}</select></label></div>`;
+}
+
+function renderTabs() {
+  const tab = (v, l) => `<button role="tab" data-tab="${v}" aria-selected="${state.view === v}">${l}</button>`;
+  return `${renderWhere()}<div class="tabs" role="tablist">${tab("health", "Health")}${tab("groupby", "Group by")}</div><div id="view"></div>`;
+}
+
+function renderMain() {
+  const main = $("main");
+  if (!state.table) return;
+  syncHash();
+  if (state.shellView !== state.view || !$("view")) {
+    destroyChart();
+    main.innerHTML = renderTabs();
+    state.shellView = state.view;
+  }
+  ++state.req;
+  if (state.view === "health") renderHealth($("view"));
+  else renderGroupBy($("view"));
+}
+
+async function renderGroupBy(main) {
+  if (!state.selected.length) {
+    destroyChart();
+    main.innerHTML = renderToolbar() + `<div class="empty">Click a column to group by it; Ctrl+click to add more. Selection order sets the chart's axis and stacks.</div>`;
+    wireToolbar();
+    return;
+  }
+  const req = state.req;
+  main.querySelector(".loading")?.remove();
+  if (!main.querySelector(".toolbar")) main.innerHTML = renderToolbar();
+  main.insertAdjacentHTML("beforeend", `<p class="loading">Running query…</p>`);
+  let data;
+  try {
+    data = await api("/api/groupby", tparams({ cols: JSON.stringify(state.selected), grains: JSON.stringify(state.grains), limit: state.limit }));
+  } catch (err) {
+    if (req !== state.req) return;
+    main.innerHTML = renderToolbar() + `<div class="error">${esc(err.message)}</div>`;
+    wireToolbar();
+    return;
+  }
+  if (req !== state.req) return;
+  destroyChart();
+  main.innerHTML = renderToolbar() + renderChartCard(data) + renderTable(data);
+  wireToolbar();
+  drawChart(data);
+}
+
+function wireToolbar() {
+  $("limit").onchange = (e) => { state.limit = +e.target.value; renderMain(); };
+  if ($("clear")) $("clear").onclick = () => setSelected([]);
+  document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => toggleColumn(b.dataset.rm)));
+  document.querySelectorAll("[data-grain]").forEach((s) => (s.onchange = () => {
+    const { [s.dataset.grain]: _, ...rest } = state.grains;
+    state.grains = s.value ? { ...rest, [s.dataset.grain]: s.value } : rest;
+    renderMain();
+  }));
+}
+
+function renderChartCard(data) {
+  const stacked = !!data.stack;
+  const n = stacked ? data.stack.x.length : data.rows.length;
+  const title = stacked
+    ? `Top ${n} ${esc(data.stack.x_label)} by count, split by ${esc(data.stack.series_label)}`
+    : `Top ${n} ${esc(data.columns[0])} by count`;
+  const legend = stacked
+    ? `<div class="legend">${data.stack.series.map((s, i) => `<span><i style="background:${seriesColor(s.name, i)}"></i>${esc(s.name)}</span>`).join("")}</div>`
+    : "";
+  return `<div class="card"><h3>${title}</h3>
+    <div class="sub">${fmt.format(data.total)} rows · ${fmt.format(data.distinct)} distinct groups</div>
+    ${legend}<div class="chart-wrap" style="height:${Math.max(160, n * 34 + 40)}px"><canvas id="chart"></canvas></div></div>`;
+}
+
+function renderTable(data) {
+  const max = Math.max(...data.rows.map((r) => r[r.length - 1]), 1);
+  const head = data.columns.map((c) => `<th>${esc(c)}</th>`).join("");
+  const body = data.rows
+    .map((r) => {
+      const cnt = r[r.length - 1];
+      const cells = r.slice(0, -1).map((v) => (v === null ? `<td class="null">null</td>` : `<td>${esc(v)}</td>`)).join("");
+      return `<tr>${cells}<td class="num">${fmt.format(cnt)}</td><td class="num">${((cnt / data.total) * 100).toFixed(1)}%</td>
+        <td class="bar-cell"><div style="width:${(cnt / max) * 100}%"></div></td></tr>`;
+    })
+    .join("");
+  return `<div class="card"><h3>Top ${data.rows.length} groups</h3>
+    <div class="sub">Grouped by ${data.columns.map(esc).join(", ")}, ${state.grains[state.selected[0]] ? "top groups by count, in date order" : "descending count"}</div>
+    <div style="overflow-x:auto"><table><thead><tr>${head}<th class="num">count</th><th class="num">%</th><th></th></tr></thead>
+    <tbody>${body}</tbody></table></div></div>`;
+}
+
+const STATUS = { ok: { icon: "✓", label: "OK" }, warn: { icon: "⚠", label: "Warning" }, error: { icon: "✕", label: "Issue" } };
+const FLAG_LABEL = {
+  all_null: "empty", sparse: "<1% filled", constant: "constant", unique: "unique", whitespace: "untrimmed",
+  looks_boolean: "looks like boolean", looks_timestamp: "looks like timestamp", looks_date: "looks like date", looks_number: "looks like number"
+};
+const NEUTRAL_FLAGS = new Set(["unique", "constant"]);
+const PROF_HEADS = [
+  ["name", "Column"], ["type", "Type"], ["filled_pct", "Filled %", true], ["nulls", "Nulls", true], ["empties", "Blanks", true],
+  ["distinct", "Distinct", true], ["min", "Min"], ["max", "Max"], ["flags", "Flags"]
+];
+const PROF_CHIPS = [["all", "All"], ["standard", "Standard"], ["custom", "Custom"], ["relationship", "Relationship"], ["empty", "Empty (<1%)"], ["flagged", "Flagged"]];
+
+const profCol = (name) => state.cache.profile?.map?.get(name);
+const isEmptyCol = (c) => c.flags.includes("all_null") || c.flags.includes("sparse");
+const isFlagged = (c) => c.flags.some((f) => f !== "unique");
+
+function fmtPct(p) {
+  if (p === 0) return "0";
+  if (p < 1) return "<1";
+  return p < 10 ? p.toFixed(1) : String(Math.round(p));
+}
+
+function ensure(kind) {
+  const t = state.table;
+  if (state.cache[kind]) return state.cache[kind];
+  const e = (state.cache[kind] = { status: "loading" });
+  api(`/api/${kind}`, tparams())
+    .then((d) => {
+      e.status = "ok";
+      e.data = d;
+      if (kind === "profile") {
+        d.columns.forEach((c) => (c.flags = c.flags || []));
+        e.map = new Map(d.columns.map((c) => [c.name, c]));
+      }
+    })
+    .catch((err) => { e.status = "error"; e.error = err.message; })
+    .then(() => { if (state.table === t && state.cache[kind] === e) paint(kind); });
+  return e;
+}
+
+function paint(kind) {
+  if (kind === "profile") {
+    renderColumns();
+    if (state.view === "health") { paintKpi(); paintProfile(); }
+  } else if (state.view === "health") paintChecks();
+}
+
+function renderHealth(view) {
+  view.innerHTML = `<div id="h-kpi"></div><div id="h-checks"></div><div id="h-prof"></div>`;
+  ensure("profile");
+  ensure("sfchecks");
+  paintKpi();
+  paintChecks();
+  paintProfile();
+}
+
+const section = (id, html) => { const el = $(id); if (el) el.innerHTML = html; return el; };
+const sectionState = (e, msg) => e.status === "loading" ? `<p class="loading">${msg}</p>` : `<div class="error">${esc(e.error)}</div>`;
+
+function paintKpi() {
+  const e = state.cache.profile;
+  if (!e) return;
+  if (e.status !== "ok") return void section("h-kpi", `<div class="card">${sectionState(e, "Profiling columns…")}</div>`);
+  const p = e.data, cols = p.columns;
+  const tile = (k, v, s = "") => `<div class="kpi"><div class="k">${k}</div><div class="v">${fmt.format(v)}</div><div class="s">${s}</div></div>`;
+  const custom = cols.filter((c) => c.kind === "custom").length;
+  const rel = cols.filter((c) => c.kind === "relationship").length;
+  section("h-kpi", `<div class="kpis">
+    ${tile("Rows", p.rows)}
+    ${tile("Columns", cols.length, `${fmt.format(custom)} custom · ${fmt.format(rel)} relationship`)}
+    ${tile("Empty columns", cols.filter(isEmptyCol).length, "&lt;1% filled")}
+    ${tile("Columns with issues", cols.filter(isFlagged).length)}</div>`);
+}
+
+function dotHtml(sev) {
+  const st = STATUS[sev] || STATUS.ok;
+  return `<span class="dot ${esc(sev)}" role="img" aria-label="${st.label}" title="${st.label}">${st.icon}</span>`;
+}
+
+function cellHtml(v) {
+  if (v === null || v === undefined) return `<td class="null">—</td>`;
+  return typeof v === "number" ? `<td class="num">${fmt.format(v)}</td>` : `<td>${esc(v)}</td>`;
+}
+
+function renderCheckRows(c) {
+  const heads = c.headers || [];
+  const numCol = heads.map((_, j) => c.rows.some((r) => typeof r.cells[j] === "number"));
+  const th = heads.map((h, j) => `<th class="${numCol[j] ? "num" : ""}">${esc(h)}</th>`).join("");
+  const body = c.rows.map((r) => {
+    const ex = r.examples?.length ? r.examples : null;
+    const first = r.column != null
+      ? `<button class="linkbtn" data-gb="${esc(r.column)}" title="Group by ${esc(r.column)}">${esc(r.cells[0] ?? r.column)}</button>`
+      : esc(r.cells[0] ?? "");
+    const rest = r.cells.slice(1).map(cellHtml).join("");
+    return `<tr class="${ex ? "hasex" : ""}"><td><span class="rowc">${dotHtml(r.severity)}${first}</span></td>${rest}</tr>` +
+      (ex ? `<tr><td class="ex" colspan="${Math.max(heads.length, 1)}">${ex.map((x) => `<span class="ex-chip" title="${esc(x)}">${esc(x)}</span>`).join("")}</td></tr>` : "");
+  }).join("");
+  return `<div style="overflow-x:auto"><table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function renderCheck(c) {
+  const st = STATUS[c.status] || STATUS.ok;
+  const head = `<h3>${esc(c.title)}</h3><span class="pill ${esc(c.status)}"><span class="dot ${esc(c.status)}" aria-hidden="true">${st.icon}</span>${st.label}</span>
+    <span class="sum">${esc(c.summary || "")}</span>`;
+  const desc = `<div class="desc">${esc(c.description || "")}</div>`;
+  if (c.rows?.length) {
+    return `<details class="card chk" ${c.status !== "ok" ? "open" : ""}><summary>${head}</summary>${desc}<div class="chk-body">${renderCheckRows(c)}</div></details>`;
+  }
+  return `<div class="card chk"><div class="chk-head">${head}</div>${desc}</div>`;
+}
+
+function paintChecks() {
+  const e = state.cache.sfchecks;
+  if (!e) return;
+  if (e.status !== "ok") return void section("h-checks", `<div class="card"><h3>Salesforce checks</h3>${sectionState(e, "Running Salesforce checks…")}</div>`);
+  section("h-checks", e.data.checks.map(renderCheck).join(""));
+}
+
+function profFiltered() {
+  const { filter, q, sort } = state.prof;
+  const all = state.cache.profile.data.columns.map((c, i) => ({ c, i }));
+  const ql = q.trim().toLowerCase();
+  const ok = (c) => {
+    if (filter === "standard" || filter === "custom" || filter === "relationship") return c.kind === filter;
+    if (filter === "empty") return isEmptyCol(c);
+    if (filter === "flagged") return isFlagged(c);
+    return true;
+  };
+  const rows = all.filter(({ c }) => ok(c) && (!ql || c.name.toLowerCase().includes(ql)));
+  if (sort.key) {
+    const val = (c) => sort.key === "flags" ? c.flags.length : sort.key === "name" || sort.key === "type" ? String(c[sort.key]).toLowerCase() : c[sort.key];
+    rows.sort((a, b) => {
+      const x = val(a.c), y = val(b.c);
+      if (x == null && y == null) return a.i - b.i;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      const r = typeof x === "number" ? x - y : x < y ? -1 : x > y ? 1 : 0;
+      return r * sort.dir || a.i - b.i;
+    });
+  }
+  return rows;
+}
+
+function flagBadges(c) {
+  return c.flags.map((f) => {
+    const warn = !NEUTRAL_FLAGS.has(f);
+    return `<span class="badge ${warn ? "warn" : ""}">${warn ? "⚠ " : ""}${esc(FLAG_LABEL[f] || f)}</span>`;
+  }).join("");
+}
+
+function renderProfRow(c) {
+  const open = state.prof.open.has(c.name);
+  const low = c.filled_pct < 1;
+  const kind = c.kind === "custom" ? `<span class="badge">custom</span>` : c.kind === "relationship" ? `<span class="badge">rel</span>` : "";
+  const pct = c.filled_pct > 0 && c.filled_pct < 0.1 ? "<0.1" : c.filled_pct.toFixed(1);
+  const w = c.filled_pct > 0 ? Math.max(c.filled_pct, 2) : 0;
+  const lim = (v) => (v == null ? `<td class="null trunc">—</td>` : `<td class="trunc" title="${esc(v)}">${esc(v)}</td>`);
+  let html = `<tr class="prow ${low ? "dim" : ""}" data-name="${esc(c.name)}" aria-expanded="${open}">
+    <td class="cname" title="${esc(c.name)}">${open ? "▾" : "▸"} ${esc(c.name)} ${kind}</td>
+    <td>${esc(c.type)}</td>
+    <td class="num"><span class="fcell"><span>${pct}%</span><span class="fbar ${low ? "low" : ""}"><i style="width:${w}%"></i></span></span></td>
+    <td class="num">${fmt.format(c.nulls)}</td><td class="num">${fmt.format(c.empties)}</td><td class="num">${fmt.format(c.distinct)}</td>
+    ${lim(c.min)}${lim(c.max)}<td>${flagBadges(c)}</td></tr>`;
+  if (open) html += renderDetail(c.name);
+  return html;
+}
+
+function renderDetail(name) {
+  const d = state.prof.detail[name];
+  let inner;
+  if (!d || d.status === "loading") inner = `<span class="loading">Loading top values…</span>`;
+  else if (d.status === "error") inner = `<div class="error">${esc(d.error)}</div>`;
+  else {
+    const g = d.data;
+    const max = Math.max(...g.rows.map((r) => r[1]), 1);
+    const body = g.rows.map((r) => {
+      const v = r[0];
+      const cell = v === null ? `<td class="null">null</td>` : v === "" ? `<td class="null">(blank)</td>` : `<td title="${esc(v)}">${esc(v)}</td>`;
+      return `<tr>${cell}<td class="num">${fmt.format(r[1])}</td><td class="num">${((r[1] / g.total) * 100).toFixed(1)}%</td>
+        <td><div class="mini"><i style="width:${(r[1] / max) * 100}%"></i></div></td></tr>`;
+    }).join("");
+    inner = `<div><table><thead><tr><th>Top values</th><th class="num">count</th><th class="num">%</th><th></th></tr></thead><tbody>${body}</tbody></table>
+      <div class="sub" style="margin:6px 0 0">${fmt.format(g.distinct)} distinct values</div></div>`;
+  }
+  return `<tr class="detail"><td colspan="${PROF_HEADS.length}"><div class="dbox">${inner}
+    <button class="btn" data-gb="${esc(name)}">Group by this column</button></div></td></tr>`;
+}
+
+function paintProfile() {
+  const e = state.cache.profile;
+  if (!e) return;
+  if (e.status !== "ok") return void section("h-prof", `<div class="card"><h3>Column profile</h3>${sectionState(e, "Profiling columns…")}</div>`);
+  section("h-prof", `<div class="card"><h3>Column profile</h3><div class="sub">Click a row for its top values, a header to sort.</div>
+    <div class="toolbar"><div class="fchips" id="prof-chips"></div>
+    <input class="prof-q" id="prof-q" placeholder="Filter by name…" value="${esc(state.prof.q)}" aria-label="Filter columns by name">
+    <span class="count" id="prof-count"></span></div>
+    <div style="overflow-x:auto" id="prof-table"></div></div>`);
+  $("prof-q").oninput = (ev) => { state.prof.q = ev.target.value; paintProfileTable(); };
+  paintProfileTable();
+}
+
+function paintProfileTable() {
+  if (!$("prof-table") || state.cache.profile?.status !== "ok") return;
+  const cols = state.cache.profile.data.columns;
+  const { filter, sort } = state.prof;
+  const counts = { all: cols.length, standard: 0, custom: 0, relationship: 0, empty: cols.filter(isEmptyCol).length, flagged: cols.filter(isFlagged).length };
+  cols.forEach((c) => { if (c.kind in counts) counts[c.kind]++; });
+  $("prof-chips").innerHTML = PROF_CHIPS
+    .map(([k, l]) => `<button class="fchip" data-chip="${k}" aria-pressed="${filter === k}">${l} ${fmt.format(counts[k])}</button>`).join("");
+  const rows = profFiltered();
+  $("prof-count").textContent = `showing ${fmt.format(rows.length)} of ${fmt.format(cols.length)}`;
+  const th = PROF_HEADS.map(([k, l, num]) => {
+    const arrow = sort.key === k ? (sort.dir > 0 ? " ▲" : " ▼") : "";
+    const as = sort.key === k ? (sort.dir > 0 ? "ascending" : "descending") : "none";
+    return `<th class="${num ? "num" : ""}" aria-sort="${as}"><button class="thbtn" data-sort="${k}">${l}${arrow}</button></th>`;
+  }).join("");
+  $("prof-table").innerHTML = `<table><thead><tr>${th}</tr></thead><tbody>${
+    rows.length ? rows.map(({ c }) => renderProfRow(c)).join("") : `<tr><td colspan="${PROF_HEADS.length}" class="null">No matching columns</td></tr>`}</tbody></table>`;
+}
+
+function loadDetail(name) {
+  const prof = state.prof;
+  if (prof.detail[name]) return;
+  const d = (prof.detail[name] = { status: "loading" });
+  api("/api/groupby", tparams({ cols: JSON.stringify([name]), limit: 5 }))
+    .then((g) => { d.status = "ok"; d.data = g; })
+    .catch((err) => { d.status = "error"; d.error = err.message; })
+    .then(() => { if (state.prof === prof) paintProfileTable(); });
+}
+
+function goGroupBy(name) {
+  setSelected([name]);
+}
+
+$("main").addEventListener("submit", (e) => {
+  if (e.target.id !== "where-form") return;
+  e.preventDefault();
+  applyWhere($("where-in").value);
+});
+$("main").addEventListener("input", (e) => {
+  if (e.target.id !== "where-in") return;
+  state.whereUi.draft = e.target.value;
+  acUpdate(e.target);
+});
+$("main").addEventListener("keydown", (e) => {
+  if (e.target.id !== "where-in") return;
+  if (e.key === " " && e.ctrlKey) { e.preventDefault(); return acUpdate(e.target, true); }
+  if (!ac.items.length) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    ac.idx = (ac.idx + (e.key === "ArrowDown" ? 1 : -1) + ac.items.length) % ac.items.length;
+    acPaint(e.target);
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    acAccept(e.target, ac.idx);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    acClose();
+  }
+});
+$("main").addEventListener("focusout", (e) => { if (e.target.id === "where-in") acClose(); });
+$("main").addEventListener("mousedown", (e) => {
+  const li = e.target.closest("#ac li");
+  if (!li) return;
+  e.preventDefault();  // keep focus in the input
+  acAccept($("where-in"), +li.dataset.i);
+});
+
+// ---- WHERE autocomplete: column names, SQL keywords, and a column's top values after a comparison
+const SQL_WORDS = ["and", "or", "not", "is null", "is not null", "in (", "not in (", "like", "ilike", "between", "true", "false"];
+const ac = { items: [], idx: 0, start: 0, end: 0, values: {} };
+const quoteId = (n) => `"${n.replace(/"/g, '""')}"`;
+const quoteVal = (v) => `'${String(v).replace(/'/g, "''")}'`;
+// `"Col" <op> 'partial` or `"Col" <op> partial`, where <op> may be an IN list in progress
+const VALUE_CTX = /(?:"([^"]+)"|([A-Za-z_][\w.]*))\s*(?:=|!=|<>|>=|<=|>|<|(?:not\s+)?i?like|(?:not\s+)?in\s*\((?:[^()]*,)?)\s*(?:'((?:[^']|'')*)|([\w.-]*))$/i;
+
+function acValues(col) {
+  const t = state.table, key = `${t.schema}.${t.name}.${col}`;
+  if (!ac.values[key]) {
+    ac.values[key] = { status: "loading", rows: [] };
+    api("/api/groupby", { schema: t.schema, table: t.name, cols: JSON.stringify([col]), limit: 100 })
+      .then((g) => { Object.assign(ac.values[key], { status: "ok", rows: g.rows.filter((r) => r[0] != null) }); })
+      .catch(() => { ac.values[key].status = "error"; })
+      .then(() => { const inp = $("where-in"); if (state.table === t && inp && document.activeElement === inp) acUpdate(inp); });
+  }
+  return ac.values[key];
+}
+
+function acUpdate(inp, force = false) {
+  const pos = inp.selectionStart, before = inp.value.slice(0, pos);
+  const vm = before.match(VALUE_CTX);
+  const col = vm && state.columns.find((c) => c.name.toLowerCase() === (vm[1] ?? vm[2]).toLowerCase());
+  if (col) {
+    const quoted = vm[3] != null, part = (quoted ? vm[3].replace(/''/g, "'") : vm[4]).toLowerCase();
+    const v = acValues(col.name);
+    ac.start = pos - (quoted ? vm[3].length + 1 : vm[4].length);
+    ac.items = v.rows
+      .filter(([val]) => String(val).toLowerCase().includes(part))
+      .slice(0, 50)
+      .map(([val, n]) => ({
+        label: String(val), hint: fmt.format(n),
+        text: !quoted && (typeof val === "number" || typeof val === "boolean") ? String(val) : quoteVal(val)
+      }));
+    if (v.status === "loading" && !ac.items.length) ac.items = [{ label: "Loading values…", hint: "", text: null }];
+  } else {
+    const m = before.match(/("?)([\w.]*)$/);
+    const inString = (before.slice(0, pos - m[0].length).match(/'/g) || []).length % 2 === 1;
+    const tok = m[2].toLowerCase();
+    ac.items = [];
+    if (!inString && (force || m[1] || tok)) {
+      ac.start = pos - m[0].length;
+      const cols = state.columns
+        .map((c) => ({ c, m: fuzzy(c.name, tok) }))
+        .filter((x) => x.m)
+        .sort((a, b) => a.m.rank - b.m.rank || a.c.name.localeCompare(b.c.name))
+        .slice(0, 30)
+        .map(({ c, m }) => ({ label: c.name, hint: c.type.replace(" WITH TIME ZONE", "TZ").toLowerCase(), text: `${quoteId(c.name)} `, hits: m.hits }));
+      const words = m[1] || !tok ? [] : SQL_WORDS.filter((w) => w.startsWith(tok) && w !== tok).map((w) => ({ label: w, hint: "keyword", text: `${w}${w.endsWith("(") ? "" : " "}` }));
+      ac.items = [...words, ...cols];
+    }
+  }
+  ac.end = pos;
+  ac.idx = 0;
+  acPaint(inp);
+}
+
+// Match `tok` in `name`: prefix (rank 0), substring (1), or letters in order (2). Returns matched positions.
+function fuzzy(name, tok) {
+  const lower = name.toLowerCase(), i = lower.indexOf(tok);
+  const span = (from) => Array.from(tok, (_, k) => from + k);
+  if (i >= 0) return { rank: i === 0 ? 0 : 1, hits: span(i) };
+  const hits = [];
+  for (let k = 0, j = 0; k < tok.length; k++, j++) {
+    j = lower.indexOf(tok[k], j);
+    if (j < 0) return null;
+    hits.push(j);
+  }
+  return { rank: 2 + (hits[hits.length - 1] - hits[0]) / 1000, hits };  // tighter matches first
+}
+
+function acPaint(inp) {
+  let ul = $("ac");
+  if (!ac.items.length) return acClose();
+  if (!ul) {
+    inp.insertAdjacentHTML("afterend", `<ul class="ac" id="ac" role="listbox"></ul>`);
+    ul = $("ac");
+  }
+  Object.assign(ul.style, { left: `${inp.offsetLeft}px`, top: `${inp.offsetTop + inp.offsetHeight + 2}px`, width: `${inp.offsetWidth}px` });
+  const hl = (it) => {
+    const hits = new Set(it.hits || []);
+    return Array.from(it.label, (ch, k) => (hits.has(k) ? `<b>${esc(ch)}</b>` : esc(ch))).join("");
+  };
+  ul.innerHTML = ac.items
+    .map((it, i) => `<li role="option" id="ac-${i}" data-i="${i}" aria-selected="${i === ac.idx}"><span class="n">${hl(it)}</span><span class="h">${esc(it.hint)}</span></li>`)
+    .join("");
+  inp.setAttribute("aria-expanded", "true");
+  inp.setAttribute("aria-activedescendant", `ac-${ac.idx}`);
+  $(`ac-${ac.idx}`)?.scrollIntoView({ block: "nearest" });
+}
+
+function acClose() {
+  ac.items = [];
+  $("ac")?.remove();
+  const inp = $("where-in");
+  if (inp) { inp.setAttribute("aria-expanded", "false"); inp.removeAttribute("aria-activedescendant"); }
+}
+
+function acAccept(inp, i) {
+  const it = ac.items[i];
+  if (!it || it.text == null) return;
+  inp.value = inp.value.slice(0, ac.start) + it.text + inp.value.slice(ac.end);
+  const caret = ac.start + it.text.length;
+  inp.setSelectionRange(caret, caret);
+  state.whereUi.draft = inp.value;
+  acClose();
+  if (it.text.endsWith("(")) acUpdate(inp);  // straight into the IN-list values
+}
+
+$("main").addEventListener("click", (e) => {
+  if (e.target.id === "where-clear") {
+    $("where-in").value = "";
+    return applyWhere("");
+  }
+  const gb = e.target.closest("[data-gb]");
+  if (gb) return goGroupBy(gb.dataset.gb);
+  const tab = e.target.closest("[data-tab]");
+  if (tab) {
+    state.view = tab.dataset.tab;
+    return renderMain();
+  }
+  if (!state.prof) return;
+  const chip = e.target.closest("[data-chip]");
+  if (chip) { state.prof.filter = chip.dataset.chip; return paintProfileTable(); }
+  const sortBtn = e.target.closest("[data-sort]");
+  if (sortBtn) {
+    const s = state.prof.sort, k = sortBtn.dataset.sort;
+    state.prof.sort = s.key === k ? { key: k, dir: -s.dir } : { key: k, dir: 1 };
+    return paintProfileTable();
+  }
+  const row = e.target.closest("tr.prow");
+  if (row) {
+    const name = row.dataset.name, open = state.prof.open;
+    if (open.has(name)) open.delete(name);
+    else { open.add(name); loadDetail(name); }
+    paintProfileTable();
+  }
+});
+
+function seriesColor(name, i) {
+  return name === OTHER ? css("--other") : css(`--s${(i % 8) + 1}`);
+}
+
+function destroyChart() {
+  state.chart?.destroy();
+  state.chart = null;
+}
+
+function label(v) {
+  return v === null ? "(null)" : String(v);
+}
+
+function drawChart(data) {
+  const surface = css("--surface-1");
+  const bar = { borderRadius: 4, borderSkipped: false, borderColor: surface, borderWidth: 2, maxBarThickness: 26 };
+  let labels, datasets;
+  if (data.stack) {
+    labels = data.stack.x.map(label);
+    datasets = data.stack.series.map((s, i) => ({ ...bar, label: s.name, data: s.data, backgroundColor: seriesColor(s.name, i) }));
+  } else {
+    labels = data.rows.map((r) => label(r[0]));
+    datasets = [{ ...bar, label: "count", data: data.rows.map((r) => r[1]), backgroundColor: css("--s1") }];
+  }
+  const tick = { color: css("--text-secondary"), font: { size: 12 } };
+  state.chart = new Chart($("chart"), {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      indexAxis: "y",
+      maintainAspectRatio: false,
+      animation: { duration: 250 },
+      interaction: { mode: data.stack ? "index" : "nearest", axis: "y", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: css("--ink"), titleColor: css("--duck"), bodyColor: css("--ink-text"),
+          borderColor: css("--duck"), borderWidth: 1, cornerRadius: 8, padding: 10, boxPadding: 4,
+          titleFont: { family: css("--serif"), size: 13, weight: "600" },
+          callbacks: {
+            label: (c) => ` ${data.stack ? c.dataset.label + ": " : ""}${fmt.format(c.raw)} (${((c.raw / data.total) * 100).toFixed(1)}%)`
+          },
+          filter: (c) => c.raw > 0
+        }
+      },
+      scales: {
+        x: { stacked: !!data.stack, beginAtZero: true, grid: { color: css("--grid") }, border: { display: false },
+             ticks: { ...tick, callback: (v) => fmt.format(v) } },
+        y: { stacked: !!data.stack, grid: { display: false }, border: { color: css("--border") },
+             ticks: { ...tick, callback(v) { const s = this.getLabelForValue(v); return s.length > 32 ? s.slice(0, 31) + "…" : s; } } }
+      }
+    }
+  });
+}
+
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => state.view === "groupby" && state.selected.length && renderMain());
+loadTables().catch((err) => ($("main").innerHTML = `<div class="error">${esc(err.message)}</div>`));
+</script>
+</body>
+</html>

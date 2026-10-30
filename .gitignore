@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Databases and data exports (may contain real org data)
+*.duckdb
+*.duckdb.wal
+*.db
+*.db.wal
+*.sqlite
+*.sqlite3
+*.parquet
+*.csv
+*.tsv
+*.xlsx
+*.json
+data/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local tooling
+.claude/settings.local.json
