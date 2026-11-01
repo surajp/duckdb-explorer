@@ -127,8 +127,10 @@ class Explorer:
 
     def group_by(self, schema: str, table: str, cols: list[str], limit: int, where: str = "",
                  grains: dict[str, str] | None = None):
-        """Top `limit` groups by count. A column with a grain is bucketed by date part; when the
-        first column is bucketed, the top groups are returned in chronological order."""
+        """Top `limit` groups by count, bucketing columns that have a grain by date part. Rows are
+        ordered by count descending at every level: by the first column's total, then within it by
+        the next column's subtotal, and so on down to the group's own count. When the first column
+        is bucketed by date, the first level is in timeline order instead."""
         grains = grains or {}
         self._validate(schema, table, cols)
         bad = {c: g for c, g in grains.items() if c not in cols or g not in GRAINS}
@@ -143,12 +145,22 @@ class Explorer:
 
         total = cur.execute(f"select count(*) from {src}").fetchone()[0]
         distinct = cur.execute(f"select count(*) from (select distinct {sel} from {src})").fetchone()[0]
+        keys = [qi(f"c{i}") for i in range(len(cols))]
+        # Subtotal of each ancestor level (first column, first two columns, ...) over all groups.
+        subtotals = [f"sum(cnt) over (partition by {', '.join(keys[:k])}) as {qi(f't{k}')}"
+                     for k in range(1, len(keys))]
+        order = [f"{qi(f't{k}')} desc, {keys[k - 1]} nulls last" for k in range(1, len(keys))]
+        if chrono:  # Date buckets label-sort chronologically; deeper levels stay by count.
+            order = [f"{keys[0]} nulls last"] + order[1:]
         top = cur.execute(
-            f"select {sel}, count(*) as cnt from {src} group by all order by cnt desc limit ?",
+            f"""
+            with g as (select {sel}, count(*) as cnt from {src} group by all),
+            topg as (select *{''.join(', ' + t for t in subtotals)} from g order by cnt desc limit ?)
+            select {', '.join(keys)}, cnt from topg
+            order by {', '.join(order + ['cnt desc', f'{keys[-1]} nulls last'])}
+            """,
             [limit],
         ).fetchall()
-        if chrono:
-            top.sort(key=lambda r: (r[0] is None, r[0]))
         result = {
             "columns": labels,
             "total": total,

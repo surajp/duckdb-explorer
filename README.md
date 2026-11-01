@@ -34,13 +34,11 @@ The screen has three panes: **Tables**, **Columns** for the selected table, and 
 
 - **Click** a column to group by just that column. Clicking it again clears it.
 - **Ctrl+click** (or Cmd+click) to add a column to the grouping, or remove one. The first column is the chart's axis; the rest split each bar into colored segments, with the top 7 series kept and the rest folded into `(other)`.
-- **Top N** (5–100) sets how many groups to show, ranked by count.
+- **Top N** (5–100) sets how many groups to show, ranked by count. Groups are always listed in descending count: with several columns, the table is ordered by the first column's total, then by each sub-group's subtotal within it. When a bucketed date column comes first, its periods are shown in date order instead (sub-groups still by count). Periods with low counts can drop out of the top N and leave gaps in the timeline, so raise **Top** to see a full range.
 - **Date and timestamp columns** get a dropdown on their chip, set to Month by default:
   - Timeline: Year, Quarter, Month, Week (ISO, e.g. `2024-W38`), Day, Hour
   - Cycle: Month of year, Week of year, Day of week, Hour of day
   - Exact value: the raw value
-
-  When a bucketed date column comes first, the top N groups are shown in date order. Periods with low counts can drop out of the top N and leave gaps in the timeline, so raise **Top** to see a full range.
 
 ![Flights grouped by day of week and split by origin airport, in the dark theme](assets/flights-dow-by-origin-dark.png)
 

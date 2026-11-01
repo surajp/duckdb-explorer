@@ -637,7 +637,9 @@ function renderTable(data) {
     })
     .join("");
   return `<div class="card"><h3>Top ${data.rows.length} groups</h3>
-    <div class="sub">Grouped by ${data.columns.map(esc).join(", ")}, ${state.grains[state.selected[0]] ? "top groups by count, in date order" : "descending count"}</div>
+    <div class="sub">Grouped by ${data.columns.map(esc).join(", ")}, ${state.grains[state.selected[0]]
+      ? (data.columns.length > 1 ? "top groups by count, in date order, then descending count" : "top groups by count, in date order")
+      : data.columns.length > 1 ? "descending count at each level" : "descending count"}</div>
     <div style="overflow-x:auto"><table><thead><tr>${head}<th class="num">count</th><th class="num">%</th><th></th></tr></thead>
     <tbody>${body}</tbody></table></div></div>`;
 }
